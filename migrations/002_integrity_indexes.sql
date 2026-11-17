@@ -1,0 +1,12 @@
+CREATE INDEX activation_user ON activation_tokens(user_id);
+CREATE INDEX membership_user ON department_memberships(user_id);
+CREATE INDEX challenges_user_expiry ON geo_challenges(user_id,expires_at);
+CREATE INDEX task_comments_task ON task_comments(task_id);
+CREATE INDEX task_events_task ON task_events(task_id);
+CREATE INDEX feedback_notes_feedback ON feedback_notes(feedback_id);
+CREATE INDEX collaborators_user ON task_collaborators(user_id);
+CREATE INDEX audit_period ON audit_log(created_at DESC);
+CREATE INDEX audit_actor ON audit_log(actor_id);
+ALTER TABLE attendance ADD CONSTRAINT checkin_geofence CHECK(check_in_distance_m>=0 AND check_in_distance_m<=200.0000001 AND check_in_accuracy>=0);
+ALTER TABLE attendance ADD CONSTRAINT checkout_geofence CHECK(check_out_distance_m IS NULL OR (check_out_distance_m>=0 AND check_out_distance_m<=200.0000001 AND check_out_accuracy>=0));
+ALTER TABLE attendance ADD CONSTRAINT checkout_complete CHECK((check_out_at IS NULL AND check_out_distance_m IS NULL AND check_out_accuracy IS NULL) OR (check_out_at IS NOT NULL AND check_out_distance_m IS NOT NULL AND check_out_accuracy IS NOT NULL));
