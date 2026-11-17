@@ -160,6 +160,8 @@ async function handle(req: NextRequest) {
             .parse(await body());
           return json(await meetings.challenge(u, b, p.action));
         }
+        if (c === "manual-checkout" && method === "POST")
+          return json(await meetings.manualCheckout(u, b, await body()));
         if ((c === "check-in" || c === "check-out") && method === "POST")
           return json(await meetings.mark(u, b, c, await body()));
         if (c === "feedback" && method === "POST")

@@ -3,6 +3,7 @@ import { db, transaction, type DB } from "./db";
 import {
   allowed,
   requirePermission,
+  requireOwner,
   fail,
   id,
   uuid,
@@ -260,8 +261,12 @@ export async function qr(u: User, mid: string) {
     meetingId: mid,
     departmentId: m.department_id,
   });
+  if (m.status !== "OPEN") fail("MEETING_CLOSED");
   if (!arrivalAllowed(m as { status: string; starts_at: string }))
-    fail("MEETING_CLOSED");
+    fail("QR_NOT_YET_OPEN", 400, {
+      opensAt: arrivalOpensAt(m.starts_at),
+      serverTime: Date.now(),
+    });
   await audit(db, u, "meeting.qr.show", "meeting", mid);
   return { ...makeQR(mid, m.qr_version), title: m.title };
 }
@@ -356,7 +361,7 @@ export async function mark(
       );
     else
       await tx.query(
-        "UPDATE attendance SET check_out_at=now(),check_out_distance_m=$3,check_out_accuracy=$4 WHERE meeting_id=$1 AND user_id=$2 AND check_out_at IS NULL",
+        "UPDATE attendance SET check_out_at=now(),check_out_source='GPS',check_out_distance_m=$3,check_out_accuracy=$4 WHERE meeting_id=$1 AND user_id=$2 AND check_out_at IS NULL",
         [mid, u.id, geo.distance, geo.accuracy],
       );
     await tx.query("UPDATE geo_challenges SET used_at=now() WHERE id=$1", [
@@ -371,5 +376,72 @@ export async function mark(
       ).rows[0],
       repeated: false,
     };
+  });
+}
+
+// Narrow exception authorized by the owner: missing departure only. Never arrival,
+// overwrites, invented GPS, or delegated permissions.
+export async function manualCheckout(u: User, mid: string, input: unknown) {
+  requireOwner(u);
+  const p = z
+    .object({
+      user_id: uuid,
+      check_out_at: date,
+      reason: z.string().trim().min(3).max(1000),
+    })
+    .strict()
+    .parse(input);
+  return transaction(async (tx) => {
+    const m = await meeting(tx, u, mid, true);
+    if (!departureAllowed(m.status)) fail("MEETING_CLOSED");
+    const row = (
+      await tx.query(
+        "SELECT * FROM attendance WHERE meeting_id=$1 AND user_id=$2 FOR UPDATE",
+        [mid, p.user_id],
+      )
+    ).rows[0];
+    if (!row) fail("CHECK_IN_REQUIRED");
+    const at = new Date(p.check_out_at).getTime();
+    if (row.check_out_at) {
+      if (
+        row.check_out_source === "OWNER_MANUAL" &&
+        row.check_out_recorded_by === u.id &&
+        new Date(row.check_out_at).getTime() === at &&
+        row.check_out_reason === p.reason
+      )
+        return { attendance: row, repeated: true };
+      fail("ALREADY_CHECKED_OUT", 409);
+    }
+    const serverNow = (
+      await tx.query("SELECT clock_timestamp() AS current_time")
+    ).rows[0].current_time;
+    if (
+      at < new Date(row.check_in_at).getTime() ||
+      at > new Date(serverNow).getTime()
+    )
+      fail("INVALID_CHECKOUT_TIME");
+    const saved = (
+      await tx.query(
+        "UPDATE attendance SET check_out_at=$3,check_out_source='OWNER_MANUAL',check_out_recorded_by=$4,check_out_recorded_at=clock_timestamp(),check_out_reason=$5 WHERE meeting_id=$1 AND user_id=$2 AND check_out_at IS NULL RETURNING *",
+        [mid, p.user_id, p.check_out_at, u.id, p.reason],
+      )
+    ).rows[0];
+    await audit(
+      tx,
+      u,
+      "attendance.manual_checkout",
+      "attendance",
+      row.id,
+      { check_out_at: null },
+      {
+        meeting_id: mid,
+        user_id: p.user_id,
+        check_out_at: p.check_out_at,
+        source: "OWNER_MANUAL",
+        reason: p.reason,
+        recorded_at: saved.check_out_recorded_at,
+      },
+    );
+    return { attendance: saved, repeated: false };
   });
 }

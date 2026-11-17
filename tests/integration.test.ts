@@ -432,3 +432,137 @@ describe("simplified attendance timing", () => {
     ).rejects.toThrow("MEETING_CLOSED");
   });
 });
+
+describe("owner-only missing departure correction", () => {
+  const departed = async () => {
+    const meetingId = (await meetings.createMeeting(owner, meetingPayload()))
+      .id;
+    const token = (await meetings.qr(owner, meetingId)).token;
+    const c = await meetings.challenge(alice, meetingId, "check-in");
+    await meetings.mark(alice, meetingId, "check-in", {
+      challenge: c.challenge,
+      token,
+      geo: geo(),
+    });
+    await meetings.updateMeeting(owner, meetingId, { status: "CLOSED" });
+    return meetingId;
+  };
+  it("only OWNER can record a manual departure, no GPS is fabricated; audit and CSV preserve provenance", async () => {
+    const meetingId = await departed();
+    const input = {
+      user_id: alice.id,
+      check_out_at: new Date().toISOString(),
+      reason: "Забыла отметить уход, время со слов участника",
+    };
+    await expect(
+      meetings.manualCheckout(alice, meetingId, input),
+    ).rejects.toThrow("FORBIDDEN");
+    const grant = await management.grant(owner, {
+      grantee_id: bob.id,
+      permission: "meetings.manage",
+      scope_type: "MEETING",
+      scope_id: meetingId,
+    });
+    await expect(
+      meetings.manualCheckout(bob, meetingId, input),
+    ).rejects.toThrow("FORBIDDEN");
+    await management.revoke(owner, grant.id);
+    const saved = await meetings.manualCheckout(owner, meetingId, input);
+    expect(saved.attendance.check_out_source).toBe("OWNER_MANUAL");
+    expect(saved.attendance.check_out_distance_m).toBeNull();
+    expect(saved.attendance.check_out_accuracy).toBeNull();
+    expect(saved.attendance.check_out_recorded_by).toBe(owner.id);
+    expect(saved.attendance.check_out_reason).toBe(input.reason);
+    expect(
+      (await meetings.manualCheckout(owner, meetingId, input)).repeated,
+    ).toBe(true);
+    await expect(
+      meetings.manualCheckout(owner, meetingId, {
+        ...input,
+        reason: "Другая причина",
+      }),
+    ).rejects.toThrow("ALREADY_CHECKED_OUT");
+    const exported = await report(
+      owner,
+      new URLSearchParams({ meeting: meetingId }),
+      true,
+    );
+    expect(
+      exported.rows.find((r) => r.user_id === alice.id)?.check_out_source,
+    ).toBe("OWNER_MANUAL");
+    expect(
+      exported.rows.find((r) => r.user_id === alice.id)?.check_out_recorded_by,
+    ).toBe(owner.id);
+    expect(
+      (
+        await db.query(
+          "SELECT * FROM audit_log WHERE action='attendance.manual_checkout' AND object_id=$1",
+          [saved.attendance.id],
+        )
+      ).rows,
+    ).toHaveLength(1);
+  });
+  it("rejects missing arrival, future/before-arrival time, empty reason, overwrites and cancelled meeting", async () => {
+    const meetingId = await departed();
+    const input = {
+      user_id: alice.id,
+      check_out_at: new Date().toISOString(),
+      reason: "Уход со слов участника",
+    };
+    await expect(
+      meetings.manualCheckout(owner, meetingId, { ...input, user_id: bob.id }),
+    ).rejects.toThrow("CHECK_IN_REQUIRED");
+    for (const check_out_at of [
+      new Date(Date.now() + 3600000).toISOString(),
+      new Date(Date.now() - 86400000).toISOString(),
+    ])
+      await expect(
+        meetings.manualCheckout(owner, meetingId, { ...input, check_out_at }),
+      ).rejects.toThrow("INVALID_CHECKOUT_TIME");
+    await expect(
+      meetings.manualCheckout(owner, meetingId, { ...input, reason: " " }),
+    ).rejects.toThrow();
+    await expect(
+      meetings.manualCheckout(owner, mid, { ...input, user_id: alice.id }),
+    ).rejects.toThrow("ALREADY_CHECKED_OUT");
+    const cancelled = (await meetings.createMeeting(owner, meetingPayload()))
+      .id;
+    await meetings.updateMeeting(owner, cancelled, { status: "CANCELLED" });
+    await expect(
+      meetings.manualCheckout(owner, cancelled, input),
+    ).rejects.toThrow("MEETING_CLOSED");
+  });
+  it("database rejects manual checkout with fabricated GPS or missing author", async () => {
+    const meetingId = await departed();
+    await expect(
+      db.query(
+        "UPDATE attendance SET check_out_at=now(),check_out_source='OWNER_MANUAL' WHERE meeting_id=$1 AND user_id=$2",
+        [meetingId, alice.id],
+      ),
+    ).rejects.toThrow();
+    await expect(
+      db.query(
+        "UPDATE attendance SET check_out_at=now(),check_out_source='OWNER_MANUAL',check_out_recorded_by=$3,check_out_recorded_at=now(),check_out_reason='test',check_out_distance_m=0,check_out_accuracy=1 WHERE meeting_id=$1 AND user_id=$2",
+        [meetingId, alice.id, owner.id],
+      ),
+    ).rejects.toThrow();
+  });
+  it("QR before opening returns opening time, not a network failure", async () => {
+    const meetingId = (
+      await meetings.createMeeting(owner, {
+        ...meetingPayload(),
+        starts_at: new Date(Date.now() + 3600000).toISOString(),
+        ends_at: new Date(Date.now() + 7200000).toISOString(),
+      })
+    ).id;
+    try {
+      await meetings.qr(owner, meetingId);
+      throw new Error("Expected QR rejection");
+    } catch (error) {
+      expect((error as { code: string }).code).toBe("QR_NOT_YET_OPEN");
+      expect(
+        (error as { details: { opensAt: number } }).details.opensAt,
+      ).toBeGreaterThan(Date.now());
+    }
+  });
+});

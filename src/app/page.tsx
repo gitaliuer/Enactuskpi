@@ -1168,7 +1168,14 @@ export default function App() {
                           {section === "reports" && <td>{r.display_name}</td>}
                           <td>{date(r.starts_at)}</td>
                           <td>{time(r.check_in_at)}</td>
-                          <td>{time(r.check_out_at)}</td>
+                          <td>
+                            {time(r.check_out_at)}
+                            {r.check_out_source === "OWNER_MANUAL" && (
+                              <small className="footnote">
+                                {ui.manualCheckoutLabel}
+                              </small>
+                            )}
+                          </td>
                           <td>
                             {r.minutes_between_marks !== null
                               ? r.minutes_between_marks + ui.s109
@@ -1176,6 +1183,19 @@ export default function App() {
                           </td>
                           <td>
                             <Badge value={r.result} />
+                            {user.owner &&
+                              section === "reports" &&
+                              r.check_in_at &&
+                              !r.check_out_at &&
+                              ["OPEN", "CLOSED"].includes(r.meeting_status) && (
+                                <button
+                                  type="button"
+                                  className="text-button"
+                                  onClick={() => open("manual-checkout", r)}
+                                >
+                                  {ui.manualCheckout}
+                                </button>
+                              )}
                           </td>
                         </tr>
                       ))}
@@ -1660,6 +1680,13 @@ export default function App() {
                       {ui.s165}
                       {time(selected.attendance.check_in_at)}
                       {ui.s169} {time(selected.attendance.check_out_at)}
+                      {selected.attendance.check_out_source ===
+                        "OWNER_MANUAL" && (
+                        <>
+                          <br />
+                          {ui.manualCheckoutLabel}
+                        </>
+                      )}
                       {selected.attendance.check_out_at && (
                         <>
                           <br />
@@ -1784,6 +1811,58 @@ export default function App() {
                       )}
                     </div>
                   )}
+              </>
+            )}
+            {dialog === "manual-checkout" && selected && user.owner && (
+              <>
+                <h2>{ui.manualCheckout}</h2>
+                <p>
+                  {selected.display_name} · {selected.title}
+                </p>
+                <p className="footnote">{ui.manualCheckoutHelp}</p>
+                <p>
+                  {ui.s165}
+                  {full(selected.check_in_at)}
+                </p>
+                <form
+                  onSubmit={(event) => {
+                    const p = values(event);
+                    void run(async () => {
+                      await api(
+                        `meetings/${selected.meeting_id}/manual-checkout`,
+                        "POST",
+                        {
+                          user_id: selected.user_id,
+                          check_out_at: new Date(
+                            p.check_out_at + "+05:00",
+                          ).toISOString(),
+                          reason: p.reason,
+                        },
+                      );
+                      await load();
+                      setReport(await api("reports?" + filters));
+                      setDialog("");
+                      setNotice(ui.manualCheckoutSaved);
+                    });
+                  }}
+                >
+                  <Field
+                    name="check_out_at"
+                    label={ui.manualCheckoutTime}
+                    type="datetime-local"
+                    step={1}
+                  />
+                  <Field
+                    name="reason"
+                    label={ui.manualCheckoutReason}
+                    type="textarea"
+                    minLength={3}
+                    maxLength={1000}
+                  />
+                  <Button type="submit" disabled={busy}>
+                    {ui.manualCheckoutSave}
+                  </Button>
+                </form>
               </>
             )}
             {dialog === "qr" && selected && <QRScreen meeting={selected} />}
@@ -2422,7 +2501,7 @@ function QRScreen({ meeting }: { meeting: Row }) {
   useEffect(() => {
     let alive = true;
     let expiry = 0;
-    let lastSuccess = 0;
+    let retryAt = 0;
     let pending = false;
     const refresh = async () => {
       if (pending) return;
@@ -2442,7 +2521,7 @@ function QRScreen({ meeting }: { meeting: Row }) {
         });
         if (alive) {
           clock.current = { server: q.serverTime, mono: started };
-          lastSuccess = performance.now();
+          retryAt = performance.now() + 15000;
           expiry = q.expiresAt;
           setNow(q.serverTime);
           setData(q);
@@ -2452,10 +2531,26 @@ function QRScreen({ meeting }: { meeting: Row }) {
         }
       } catch (e) {
         if (alive) {
-          setConnected(false);
+          const err = e as Error & { details?: { opensAt?: number } };
+          const domainError = [
+            "QR_NOT_YET_OPEN",
+            "MEETING_CLOSED",
+            "FORBIDDEN",
+            "NOT_FOUND",
+            "UNAUTHENTICATED",
+            "RATE_LIMITED",
+          ].includes(err.message);
+          setConnected(domainError);
+          setData(null);
+          setImage("");
+          expiry = 0;
+          retryAt = performance.now() + 15000;
           setError(
-            ru.errors[(e as Error).message as keyof typeof ru.errors] ??
-              ru.error,
+            err.message === "QR_NOT_YET_OPEN" &&
+              Number.isFinite(err.details?.opensAt)
+              ? ui.qrOpensAt +
+                  full(new Date(err.details!.opensAt!).toISOString())
+              : (ru.errors[err.message as keyof typeof ru.errors] ?? ru.error),
           );
         }
       } finally {
@@ -2467,7 +2562,7 @@ function QRScreen({ meeting }: { meeting: Row }) {
       const serverNow =
         clock.current.server + (performance.now() - clock.current.mono);
       setNow(serverNow);
-      if (serverNow >= expiry || performance.now() - lastSuccess >= 15000)
+      if ((expiry > 0 && serverNow >= expiry) || performance.now() >= retryAt)
         void refresh();
     }, 1000);
     const focus = () => {
@@ -2522,7 +2617,11 @@ function QRScreen({ meeting }: { meeting: Row }) {
                 .padStart(2, "0"),
               (seconds % 60).toString().padStart(2, "0"),
             )
-          : ui.s279}
+          : connected && error
+            ? error.startsWith(ui.qrOpensAt)
+              ? ui.qrWaitingOpening
+              : ui.qrBlocked
+            : ui.s279}
       </div>
       <p className="footnote">
         <span className={connected ? "live-dot" : "offline-dot"} />{" "}

@@ -42,6 +42,9 @@ export const ru = {
     PASSWORD_TOO_LONG: "Пароль не должен превышать 256 символов.",
     MEETING_CLOSED: "Собрание или окно отметки закрыто",
     QR_EXPIRED: "QR истёк. Отсканируйте новый код",
+    QR_NOT_YET_OPEN: "Регистрация ещё не началась",
+    INVALID_CHECKOUT_TIME:
+      "Время ухода должно быть не раньше прихода и не в будущем",
     QR_INVALID: "Некорректный QR. Отсканируйте код собрания",
     GEO_OUTSIDE_RADIUS: "Вы дальше 200 м от места собрания",
     GEO_UNAVAILABLE: "Не удалось получить координаты",
@@ -91,6 +94,18 @@ export const label = (v: string) => ru.status[v as keyof typeof ru.status] ?? v;
 
 // UI copy extracted for translation. Keep keys stable when adding Kazakh.
 export const ui = {
+  manualCheckout: "Внести забытый уход",
+  manualCheckoutLabel: "Внесено владельцем вручную, без GPS",
+  manualCheckoutHelp:
+    "Только для уже отмеченного прихода без ухода. Укажите фактическое время ухода со слов участника и причину. Это не GPS-подтверждение. После сохранения время нельзя переписать.",
+  manualCheckoutTime: "Фактический уход · Asia/Almaty (UTC+5)",
+  manualCheckoutReason: "Причина ручного внесения",
+  manualCheckoutSave: "Сохранить ручной уход",
+  manualCheckoutSaved: "Уход внесён с пометкой «вручную, без GPS»",
+  qrOpensAt: "QR будет доступен с ",
+  qrWaitingOpening: "Ожидаем начала регистрации",
+  qrBlocked: "Регистрация недоступна",
+
   simpleArrivalFrom: "Приход по QR доступен с",
   simpleAttendanceRules:
     "Приход — за 10 минут до начала, пока регистрация открыта организатором. Опоздание — позже 15 минут после начала. Уход — когда уходите, без QR и без срока, с проверкой геолокации. Закрытие собрания не ставит уход автоматически и не мешает отметить его позже.",

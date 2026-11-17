@@ -43,7 +43,7 @@
 
 QR: HMAC-SHA256, base64url JSON с meetingId, purpose=check-in, interval=floor(serverMs/180000), expiresAt=(interval+1)*180000, version. Один токен интервала для всех экранов, много участников. Проверка в момент POST, **без grace period**. Секрет не выходит в браузер. Закрытие и отмена проверяются в той же транзакции, что отметка; строка собрания FOR UPDATE сериализует гонки. Время PostgreSQL now(). Уникальность meeting+user. Повтор уже выполненного действия возвращает существующую собственную запись даже после истечения QR: это восстановление результата, не новая отметка и не перезапись времени.
 
-Ошибки отметок: MEETING_CLOSED, QR_EXPIRED, QR_INVALID, GEO_UNAVAILABLE, GEO_STALE, GEO_INACCURATE, GEO_OUTSIDE_RADIUS, CHECK_IN_REQUIRED. Идемпотентные повторы возвращают repeated=true вместо ошибки ALREADY_CHECKED_IN/OUT. Клиентские запрет GPS и timeout не отправляют POST отметки и показывают GEO_PERMISSION_DENIED/GEO_TIMEOUT. Ручного attendance PATCH/POST API нет.
+Ошибки отметок: MEETING_CLOSED, QR_EXPIRED, QR_INVALID, GEO_UNAVAILABLE, GEO_STALE, GEO_INACCURATE, GEO_OUTSIDE_RADIUS, CHECK_IN_REQUIRED. Идемпотентные повторы возвращают repeated=true вместо ошибки ALREADY_CHECKED_IN/OUT. Клиентские запрет GPS и timeout не отправляют POST отметки и показывают GEO_PERMISSION_DENIED/GEO_TIMEOUT. Общего attendance PATCH/POST API нет; исключение только для OWNER описано ниже.
 
 ## Задачи
 
@@ -72,3 +72,11 @@ QR: HMAC-SHA256, base64url JSON с meetingId, purpose=check-in, interval=floor(s
 Экспорт дополнительно требует reports.export для каждой строки. UTF-8 BOM, RFC-подобное quoting, защита от spreadsheet formula injection. В MVP экспорт отчёта посещаемости. Анонимный отзыв не содержит точного времени и не связан с автором в dedup/audit. Против случайных повторов — случайный ключ 1 ч без user_id, плюс отдельный счётчик частоты пользователя без ID отзыва и текста. Уникальность «один анонимный отзыв на человека» намеренно не обещается.
 
 Списки ограничены 500, audit — 200. Это предел первой версии, не заявленная нагрузочная ёмкость; отчёт посещаемости без этого среза. Для команды выше этих размеров до запуска нужны pagination и нагрузочное испытание. Не выводите чувствительные тела HTTP или URL с QR/activation в аналитику/proxy-логи. QR использует fragment URL (не отправляется в HTTP access log), краткоживущий bearer token; front удаляет его из history при загрузке, Referrer-Policy no-referrer.
+
+## Исключение: забытый уход (решение владельца 17 ноября 2026)
+
+`POST /api/meetings/:id/manual-checkout` — только OWNER, без возможности делегировать. Тело: `{user_id, check_out_at: ISO8601 с offset, reason: строка 3..1000}`. Только существующий приход без ухода, OPEN/CLOSED; отмена запрещена. Время не раньше прихода и не в будущем, по серверному clock_timestamp(). Записанный уход (включая GPS) не перезаписывается. Повтор идентичного ручного запроса возвращает repeated=true; другое исправление — ALREADY_CHECKED_OUT 409.
+
+Транзакция блокирует собрание и attendance, сохраняет источник OWNER_MANUAL, автора, время внесения, причину; GPS accuracy/distance остаются NULL. Audit attendance.manual_checkout в той же транзакции. В интерфейсе: Отчёты → строка без ухода → Внести забытый уход. Участник видит «вручную, без GPS» в своей истории и карточке; отчёты/CSV содержат check_out_source, check_out_recorded_by, check_out_recorded_at, check_out_reason. Незаполненный уход в отчёте имеет NULL source; DEFAULT GPS в таблице обеспечивает совместимость обычных вставок со старой сборкой.
+
+QR до начала−10 минут возвращает QR_NOT_YET_OPEN с details.opensAt и serverTime (epoch ms). UI показывает время открытия, не выдаёт отказ по расписанию за сетевой обрыв и повторяет запрос не чаще раза в 15 секунд при ожидании. Истёкшие коды не показываются; 180 секунд и проверка без grace не менялись.

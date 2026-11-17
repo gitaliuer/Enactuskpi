@@ -4,11 +4,25 @@ const credentials = JSON.parse(
   readFileSync(".local/e2e-credentials.json", "utf8"),
 );
 
-test.beforeEach(async ({ page }) => {
+let ownerCookies: Awaited<
+  ReturnType<import("@playwright/test").BrowserContext["cookies"]>
+> = [];
+// Reuse a single owner login per spec, without weakening production rate limits.
+test.beforeAll(async ({ playwright }) => {
+  const api = await playwright.request.newContext({
+    baseURL: "http://localhost:3100",
+  });
+  const login = await api.post("/api/auth/login", {
+    headers: { origin: "http://localhost:3100" },
+    data: { login: credentials.login, password: credentials.password },
+  });
+  expect(login.status()).toBe(200);
+  ownerCookies = (await api.storageState()).cookies;
+  await api.dispose();
+});
+test.beforeEach(async ({ page, context }) => {
+  await context.addCookies(ownerCookies);
   await page.goto("/");
-  await page.getByLabel("Логин", { exact: true }).fill(credentials.login);
-  await page.getByLabel("Пароль", { exact: true }).fill(credentials.password);
-  await page.getByRole("button", { name: "Войти", exact: true }).click();
   await page.getByRole("button", { name: "Собрания", exact: true }).click();
   await page
     .getByRole("button", { name: "Создать собрание", exact: true })

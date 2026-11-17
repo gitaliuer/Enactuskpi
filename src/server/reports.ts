@@ -8,7 +8,7 @@ export async function report(
 ) {
   const rows = (
     await db.query(
-      `SELECT m.id AS meeting_id,m.title,m.starts_at,m.status AS meeting_status,m.late_after_minutes,ma.user_id,ma.department_id,ma.required,u.display_name,a.check_in_at,a.check_out_at FROM meeting_attendees ma JOIN meetings m ON m.id=ma.meeting_id JOIN users u ON u.id=ma.user_id LEFT JOIN attendance a ON a.meeting_id=ma.meeting_id AND a.user_id=ma.user_id WHERE m.status<>'CANCELLED' ORDER BY m.starts_at DESC`,
+      `SELECT m.id AS meeting_id,m.title,m.starts_at,m.status AS meeting_status,m.late_after_minutes,ma.user_id,ma.department_id,ma.required,u.display_name,a.check_in_at,a.check_out_at,CASE WHEN a.check_out_at IS NOT NULL THEN a.check_out_source END AS check_out_source,a.check_out_recorded_by,a.check_out_recorded_at,a.check_out_reason FROM meeting_attendees ma JOIN meetings m ON m.id=ma.meeting_id JOIN users u ON u.id=ma.user_id LEFT JOIN attendance a ON a.meeting_id=ma.meeting_id AND a.user_id=ma.user_id WHERE m.status<>'CANCELLED' ORDER BY m.starts_at DESC`,
     )
   ).rows;
   const out: Record<string, any>[] = [];
