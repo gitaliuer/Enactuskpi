@@ -13,6 +13,12 @@ import {
   type User,
   rateLimit,
 } from "./core";
+import {
+  arrivalAllowed,
+  arrivalOpensAt,
+  departureAllowed,
+  LATE_AFTER_MINUTES,
+} from "../lib/attendance-policy";
 const date = z.string().datetime({ offset: true });
 export const meetingInput = z
   .object({
@@ -21,9 +27,9 @@ export const meetingInput = z
     status: z.enum(["DRAFT", "SCHEDULED", "OPEN"]).default("DRAFT"),
     starts_at: date,
     ends_at: date,
-    registration_open_at: date,
-    registration_close_at: date,
-    checkout_close_at: date,
+    registration_open_at: date.optional(),
+    registration_close_at: date.nullable().optional(),
+    checkout_close_at: date.nullable().optional(),
     latitude: z.number().min(-90).max(90),
     longitude: z.number().min(-180).max(180),
     location_label: z.string().max(200).default(""),
@@ -40,10 +46,7 @@ export const meetingInput = z
   })
   .strict()
   .refine(
-    (m) =>
-      new Date(m.ends_at) > new Date(m.starts_at) &&
-      new Date(m.registration_close_at) > new Date(m.registration_open_at) &&
-      new Date(m.checkout_close_at) >= new Date(m.registration_close_at),
+    (m) => new Date(m.ends_at) > new Date(m.starts_at),
     "Invalid time windows",
   );
 export async function meeting(tx: DB, u: User, mid: string, lock = false) {
@@ -145,14 +148,14 @@ export async function createMeeting(u: User, input: unknown) {
         m.status,
         m.starts_at,
         m.ends_at,
-        m.registration_open_at,
-        m.registration_close_at,
-        m.checkout_close_at,
+        new Date(arrivalOpensAt(m.starts_at)).toISOString(),
+        null,
+        null,
         m.latitude,
         m.longitude,
         m.location_label,
         m.department_id,
-        m.late_after_minutes,
+        LATE_AFTER_MINUTES,
         u.id,
       ],
     );
@@ -257,11 +260,7 @@ export async function qr(u: User, mid: string) {
     meetingId: mid,
     departmentId: m.department_id,
   });
-  if (
-    m.status !== "OPEN" ||
-    Date.now() < new Date(m.registration_open_at).getTime() ||
-    Date.now() >= new Date(m.registration_close_at).getTime()
-  )
+  if (!arrivalAllowed(m as { status: string; starts_at: string }))
     fail("MEETING_CLOSED");
   await audit(db, u, "meeting.qr.show", "meeting", mid);
   return { ...makeQR(mid, m.qr_version), title: m.title };
@@ -269,7 +268,12 @@ export async function qr(u: User, mid: string) {
 export async function challenge(u: User, mid: string, action: string) {
   if (!["check-in", "check-out"].includes(action)) fail("INVALID_INPUT");
   const m = await meeting(db, u, mid);
-  if (m.status !== "OPEN") fail("MEETING_CLOSED");
+  if (
+    action === "check-in"
+      ? !arrivalAllowed(m as { status: string; starts_at: string })
+      : !departureAllowed(m.status)
+  )
+    fail("MEETING_CLOSED");
   if (
     !(
       await db.query(
@@ -324,17 +328,10 @@ export async function mark(
     if (action === "check-out" && existing?.check_out_at)
       return { attendance: existing, repeated: true };
     const now = Date.now();
-    if (m.status !== "OPEN") fail("MEETING_CLOSED");
     if (
-      action === "check-in" &&
-      (now < new Date(m.registration_open_at).getTime() ||
-        now >= new Date(m.registration_close_at).getTime())
-    )
-      fail("MEETING_CLOSED");
-    if (
-      action === "check-out" &&
-      (now < new Date(m.registration_open_at).getTime() ||
-        now >= new Date(m.checkout_close_at).getTime())
+      action === "check-in"
+        ? !arrivalAllowed(m as { status: string; starts_at: string }, now)
+        : !departureAllowed(m.status)
     )
       fail("MEETING_CLOSED");
     if (action === "check-out" && !existing) fail("CHECK_IN_REQUIRED");

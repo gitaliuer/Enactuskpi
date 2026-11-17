@@ -82,3 +82,33 @@ test("denied GPS preserves manual coordinates and explains permission", async ({
     "78.37",
   );
 });
+
+test("meeting creation needs only start and end and server applies timing rules", async ({
+  page,
+}) => {
+  await expect(page.locator('input[type="datetime-local"]')).toHaveCount(2);
+  await expect(
+    page.locator(
+      '[name="registration_open_at"], [name="registration_close_at"], [name="checkout_close_at"], [name="late_after_minutes"]',
+    ),
+  ).toHaveCount(0);
+  await page.getByLabel("Название", { exact: true }).fill("Простое расписание");
+  await page
+    .getByLabel("Место, аудитория", { exact: true })
+    .fill("Тестовая аудитория");
+  await page.getByLabel("Широта точки", { exact: true }).fill("45.015");
+  await page.getByLabel("Долгота точки", { exact: true }).fill("78.373");
+  await page.getByLabel("Начало", { exact: true }).fill("2026-12-01T17:00");
+  await page.getByLabel("Окончание", { exact: true }).fill("2026-12-01T18:00");
+  const responsePromise = page.waitForResponse(
+    (r) => r.url().endsWith("/api/meetings") && r.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Создать черновик" }).click();
+  const response = await responsePromise;
+  expect(response.status()).toBe(201);
+  const created = await response.json();
+  const detail = await page.request.get(`/api/meetings/${created.id}`);
+  const data = await detail.json();
+  expect(JSON.stringify(data)).toContain("2026-12-01T11:50:00");
+  expect(JSON.stringify(data)).toContain('"late_after_minutes":15');
+});

@@ -362,3 +362,73 @@ describe("reports", () => {
     expect(r.metrics.visited).toBe(0);
   });
 });
+
+describe("simplified attendance timing", () => {
+  it("derives times on the server and ignores obsolete custom windows", async () => {
+    const payload = meetingPayload();
+    const meetingId = (await meetings.createMeeting(owner, payload)).id;
+    const saved = await meetings.meeting(db, owner, meetingId);
+    expect(new Date(saved.registration_open_at).getTime()).toBe(
+      new Date(payload.starts_at).getTime() - 10 * 60000,
+    );
+    expect(saved.registration_close_at).toBeNull();
+    expect(saved.checkout_close_at).toBeNull();
+    expect(saved.late_after_minutes).toBe(15);
+  });
+  it("allows geoverified departure after closing and legacy deadlines without QR", async () => {
+    const meetingId = (await meetings.createMeeting(owner, meetingPayload()))
+      .id;
+    const token = (await meetings.qr(owner, meetingId)).token;
+    const arrival = await meetings.challenge(alice, meetingId, "check-in");
+    await meetings.mark(alice, meetingId, "check-in", {
+      challenge: arrival.challenge,
+      token,
+      geo: geo(),
+    });
+    await meetings.updateMeeting(owner, meetingId, { status: "CLOSED" });
+    await db.query(
+      "UPDATE meetings SET registration_open_at=now()-interval '3 hours',registration_close_at=now()-interval '2 hours',checkout_close_at=now()-interval '1 hour' WHERE id=$1",
+      [meetingId],
+    );
+    await expect(
+      meetings.challenge(alice, meetingId, "check-in"),
+    ).rejects.toThrow("MEETING_CLOSED");
+    const departure = await meetings.challenge(alice, meetingId, "check-out");
+    await expect(
+      meetings.mark(alice, meetingId, "check-out", {
+        challenge: departure.challenge,
+        geo: { ...geo(), latitude: 46 },
+      }),
+    ).rejects.toThrow("GEO_OUTSIDE_RADIUS");
+    const result = await meetings.mark(alice, meetingId, "check-out", {
+      challenge: departure.challenge,
+      geo: geo(),
+    });
+    expect(result.attendance.check_out_at).toBeTruthy();
+    const repeated = await meetings.mark(alice, meetingId, "check-out", {
+      challenge: departure.challenge,
+      geo: geo(),
+    });
+    expect(String(repeated.attendance.check_out_at)).toBe(
+      String(result.attendance.check_out_at),
+    );
+  });
+  it("still blocks a departure without arrival and on cancellation", async () => {
+    const meetingId = (await meetings.createMeeting(owner, meetingPayload()))
+      .id;
+    await meetings.updateMeeting(owner, meetingId, { status: "CLOSED" });
+    const departure = await meetings.challenge(alice, meetingId, "check-out");
+    await expect(
+      meetings.mark(alice, meetingId, "check-out", {
+        challenge: departure.challenge,
+        geo: geo(),
+      }),
+    ).rejects.toThrow("CHECK_IN_REQUIRED");
+    const cancelled = (await meetings.createMeeting(owner, meetingPayload()))
+      .id;
+    await meetings.updateMeeting(owner, cancelled, { status: "CANCELLED" });
+    await expect(
+      meetings.challenge(alice, cancelled, "check-out"),
+    ).rejects.toThrow("MEETING_CLOSED");
+  });
+});

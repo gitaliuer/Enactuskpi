@@ -38,6 +38,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import QRCode from "qrcode";
+import { arrivalOpensAt, departureAllowed } from "@/lib/attendance-policy";
 import { MeetingLocationFields } from "./meeting-location-fields";
 import Link from "next/link";
 import { ru, label, ui } from "@/lib/i18n";
@@ -596,7 +597,10 @@ export default function App() {
     ["audit", "OWNER"],
   ].filter(([, p]) => (p === "OWNER" ? user.owner : can(p)));
   const active = meetings.find(
-    (m) => m.status === "OPEN" && m.expected && !m.attendance?.check_out_at,
+    (m) =>
+      m.expected &&
+      !m.attendance?.check_out_at &&
+      (m.status === "OPEN" || (m.attendance && departureAllowed(m.status))),
   );
   const upcoming = meetings
     .filter((m) => !["CANCELLED", "CLOSED", "DRAFT"].includes(m.status))
@@ -1634,15 +1638,14 @@ export default function App() {
                   </p>
                   <p>
                     <Clock size={17} />
-                    {ui.s165}
-                    {full(selected.registration_open_at)} —{" "}
-                    {time(selected.registration_close_at)}
+                    {ui.simpleArrivalFrom}{" "}
+                    {full(
+                      new Date(
+                        arrivalOpensAt(selected.starts_at),
+                      ).toISOString(),
+                    )}
                   </p>
-                  <p>
-                    <Clock size={17} />
-                    {ui.s166}
-                    {full(selected.checkout_close_at)}
-                  </p>
+                  <p className="footnote">{ui.simpleAttendanceRules}</p>
                 </div>
                 <div className="attendance-box">
                   <strong>
@@ -1677,7 +1680,9 @@ export default function App() {
                   )}
                 </div>
                 {selected.expected &&
-                  selected.status === "OPEN" &&
+                  (selected.status === "OPEN" ||
+                    (selected.attendance &&
+                      departureAllowed(selected.status))) &&
                   !selected.attendance?.check_out_at && (
                     <>
                       {!selected.attendance && !qrToken && (
@@ -1833,13 +1838,7 @@ export default function App() {
                         longitude: Number(p.longitude),
                         starts_at: toISO(p.starts_at),
                         ends_at: toISO(p.ends_at),
-                        registration_open_at: toISO(p.registration_open_at),
-                        registration_close_at: toISO(p.registration_close_at),
-                        checkout_close_at: toISO(p.checkout_close_at),
                         status: "DRAFT",
-                        late_after_minutes: p.late_after_minutes
-                          ? Number(p.late_after_minutes)
-                          : null,
                         attendees: users
                           .filter((u) => p["attendee_" + u.id])
                           .map((u) => ({
@@ -1875,30 +1874,7 @@ export default function App() {
                       type="datetime-local"
                     />
                   </div>
-                  <div className="form-row">
-                    <Field
-                      name="registration_open_at"
-                      label={ui.s199}
-                      type="datetime-local"
-                    />
-                    <Field
-                      name="registration_close_at"
-                      label={ui.s200}
-                      type="datetime-local"
-                    />
-                  </div>
-                  <Field
-                    name="checkout_close_at"
-                    label={ui.s201}
-                    type="datetime-local"
-                  />
-                  <Field
-                    name="late_after_minutes"
-                    label={ui.s202}
-                    type="number"
-                    min={0}
-                    required={false}
-                  />
+                  <p className="footnote">{ui.simpleAttendanceRules}</p>
                   <fieldset>
                     <legend>{ui.s203}</legend>
                     {users

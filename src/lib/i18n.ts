@@ -91,6 +91,9 @@ export const label = (v: string) => ru.status[v as keyof typeof ru.status] ?? v;
 
 // UI copy extracted for translation. Keep keys stable when adding Kazakh.
 export const ui = {
+  simpleArrivalFrom: "Приход по QR доступен с",
+  simpleAttendanceRules:
+    "Приход — за 10 минут до начала, пока регистрация открыта организатором. Опоздание — позже 15 минут после начала. Уход — когда уходите, без QR и без срока, с проверкой геолокации. Закрытие собрания не ставит уход автоматически и не мешает отметить его позже.",
   meetingLocationTitle: "Точка собрания",
   meetingLocationUse: "Использовать моё местоположение",
   meetingLocationLoading: "Определяем место…",

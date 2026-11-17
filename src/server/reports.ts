@@ -1,4 +1,5 @@
 import { db } from "./db";
+import { isLate } from "../lib/attendance-policy";
 import { allowed, fail, type User } from "./core";
 export async function report(
   u: User,
@@ -43,11 +44,7 @@ export async function report(
         : closed && r.required
           ? "ABSENT"
           : "NOT_MARKED",
-      late:
-        r.check_in_at && r.late_after_minutes !== null
-          ? new Date(r.check_in_at).getTime() >
-            new Date(r.starts_at).getTime() + r.late_after_minutes * 60000
-          : null,
+      late: r.check_in_at ? isLate(r.check_in_at, r.starts_at) : null,
       minutes_between_marks: r.check_out_at
         ? Math.round(
             (new Date(r.check_out_at).getTime() -
