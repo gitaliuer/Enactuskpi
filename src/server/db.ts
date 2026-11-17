@@ -2,6 +2,7 @@ import { attachDatabasePool } from "@vercel/functions";
 import { mkdirSync } from "node:fs";
 import { Pool, type PoolClient } from "pg";
 import { PGlite } from "@electric-sql/pglite";
+import { databaseConfig } from "./database-config";
 export type DB = {
   query<T extends Record<string, any> = Record<string, any>>(
     text: string,
@@ -33,7 +34,7 @@ function pool() {
     throw new Error("DATABASE_URL is not configured");
   if (!g.pool) {
     g.pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
+      ...databaseConfig(process.env.DATABASE_URL),
       max: 5,
       idleTimeoutMillis: 10000,
       connectionTimeoutMillis: 10000,
