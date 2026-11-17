@@ -20,7 +20,7 @@
     "db:prune": "tsx scripts/prune.ts"
   },
   "engines": {
-    "node": ">=22"
+    "node": "22.x"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",
