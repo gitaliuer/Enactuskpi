@@ -91,6 +91,13 @@ export const label = (v: string) => ru.status[v as keyof typeof ru.status] ?? v;
 
 // UI copy extracted for translation. Keep keys stable when adding Kazakh.
 export const ui = {
+  meetingLocationTitle: "Точка собрания",
+  meetingLocationUse: "Использовать моё местоположение",
+  meetingLocationLoading: "Определяем место…",
+  meetingLocationHelp:
+    "Нажмите, находясь на месте будущего собрания. Запросим GPS только сейчас, без отслеживания. Или введите координаты вручную. Это не отметка посещения.",
+  meetingLocationAccuracy:
+    "Координаты заполнены. Точность устройства: ±{meters} м. Проверьте точку перед сохранением; радиус отметки — 200 м.",
   activationCodeHelp:
     "Шаг 1 из 2 · Активация. Вставьте одноразовый код из последнего приглашения либо всю ссылку. Если код подставился автоматически, его можно заменить. Ниже задайте новый пароль.",
   activationCodeLabel: "Код активации или ссылка-приглашение",

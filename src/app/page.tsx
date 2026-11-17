@@ -38,6 +38,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import QRCode from "qrcode";
+import { MeetingLocationFields } from "./meeting-location-fields";
 import Link from "next/link";
 import { ru, label, ui } from "@/lib/i18n";
 type Row = Record<string, any>;
@@ -1802,22 +1803,11 @@ export default function App() {
                     label={ui.s186}
                     defaultValue={selected.title}
                   />
-                  <div className="form-row">
-                    <Field
-                      name="latitude"
-                      label={ui.s187}
-                      type="number"
-                      step="any"
-                      defaultValue={selected.latitude}
-                    />
-                    <Field
-                      name="longitude"
-                      label={ui.s188}
-                      type="number"
-                      step="any"
-                      defaultValue={selected.longitude}
-                    />
-                  </div>
+                  <MeetingLocationFields
+                    key={selected.id}
+                    latitude={selected.latitude}
+                    longitude={selected.longitude}
+                  />
                   <Button type="submit" disabled={busy}>
                     {ui.s189}
                   </Button>
@@ -1871,24 +1861,7 @@ export default function App() {
                     {deptSelect}
                   </Field>
                   <Field name="location_label" label={ui.s193} />
-                  <div className="form-row">
-                    <Field
-                      name="latitude"
-                      label={ui.s194}
-                      type="number"
-                      min={-90}
-                      max={90}
-                      step="any"
-                    />
-                    <Field
-                      name="longitude"
-                      label={ui.s195}
-                      type="number"
-                      min={-180}
-                      max={180}
-                      step="any"
-                    />
-                  </div>
+                  <MeetingLocationFields />
                   <p className="footnote">{ui.s196}</p>
                   <div className="form-row">
                     <Field
